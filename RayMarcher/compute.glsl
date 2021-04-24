@@ -2,118 +2,137 @@
 layout (local_size_x = 1, local_size_y = 1) in;
 layout (binding = 0, rgba32f) uniform image2D image;
 
-uniform vec2 mousePos;
+#define PI 3.1415926535
+#define EPSILON 0.001
+#define MAX_ITERATIONS 64
+#define MAX_DIST 1000000
 
-struct Circle {
-	vec2 center;
-	float radius;
-};
+const float fovh = PI/2;
+float fovv;
 
-struct Box {
-	vec2 center;
-	vec2 size;
-};
+uniform vec3 viewDirection;
+uniform vec3 viewPosition;
+uniform vec2 viewRotation;
 
 struct Camera {
-	vec2 position;
-	vec2 direction;
+	vec3 position;
+	vec3 direction;
 };
 
-const int numCircles = 3;
-const Circle circles[numCircles] = {{vec2(100, 100), 30}, {vec2(300, 100), 40}, {vec2(600, 400), 70}};
+struct Ray {
+	vec3 origin;
+	vec3 direction;
+};
 
-const int numBoxes = 3;
-const Box boxes[numBoxes] = {{vec2(100, 450), vec2(100, 80)}, {vec2(1000, 100), vec2(200, 70)}, {vec2(700, 700), vec2(140, 100)}};
-
-float circleSDF(vec2 p, vec2 center, float radius)
+float intersectSDF(float distA, float distB)
 {
-	return length(center - p) - radius;
+	return max(distA, distB);
 }
 
-float boxSDF(vec2 p, vec2 center, vec2 size)
+float unionSDF(float distA, float distB)
 {
-	vec2 offset = abs(p - center) - size;
-
-	float unsignedDist = length(max(offset, 0));
-	float distInside = min(max(offset.x, offset.y), 0);
-	return unsignedDist + distInside;
+	return min(distA, distB);
 }
 
-vec4 blend(vec2 pos, vec4 color)
+float differenceSDF(float distA, float distB)
 {
-	vec4 currentColor = imageLoad(image, ivec2(pos));
-	return vec4(color.a * color.rgb + (1.0 - color.a) * currentColor.rgb, 1.0);
+	return max(distA, -distB);
 }
 
-void clear(vec2 pixelPos)
+float sphereSDF(vec3 p, vec3 pos, float radius)
 {
-	imageStore(image, ivec2(pixelPos), vec4(1.0, 1.0, 1.0, 1.0));
+	p = p - pos;
+	return length(p) - radius;
 }
 
-void drawCircle(vec2 pixelPos, vec2 center, float radius, vec4 insideColor, vec4 edgeColor)
+float boxSDF(vec3 p, vec3 pos, vec3 size)
 {
-	float dist = length(pixelPos - center) - radius;
-	if (dist <= 1){
-		if (dist >= -1){
-			imageStore(image, ivec2(pixelPos), blend(pixelPos, edgeColor));
+	p = p - pos;
+	vec3 q = abs(p) - size;
+	return length(max(q, 0)) + min(max(q.x, max(q.y, q.z)), 0);
+}
+
+
+float sceneSDF(vec3 p)
+{
+	float sphere = sphereSDF(p, vec3(0, 0, 0), 1.2);
+	float cube = boxSDF(p, vec3(0, 0, 0), vec3(1));
+	return intersectSDF(cube, sphere);
+}
+
+vec3 estimateNormal(vec3 p)
+{
+	return normalize(vec3(sceneSDF(vec3(p.x + EPSILON, p.yz)) - sceneSDF(vec3(p.x - EPSILON, p.yz)),
+					 sceneSDF(vec3(p.x, p.y + EPSILON, p.z)) - sceneSDF(vec3(p.x, p.y - EPSILON, p.z)),
+					 sceneSDF(vec3(p.xy, p.z + EPSILON)) - sceneSDF(vec3(p.xy, p.z - EPSILON))));
+}
+
+float rayMarch(Ray ray)
+{
+	float closestDist = MAX_DIST;
+	float travelledDist = 0;
+	vec3 position = ray.origin;
+	for (int i = 0; i < MAX_ITERATIONS; i++) {
+		closestDist = sceneSDF(position);
+		travelledDist += closestDist;
+
+		if (closestDist < EPSILON) {
+			return travelledDist;
+		} else if (travelledDist > MAX_DIST) {
+			return MAX_DIST;
 		}
-		else {
-			imageStore(image, ivec2(pixelPos), blend(pixelPos, insideColor));
-		}
+
+		position += closestDist * ray.direction;
 	}
+	return MAX_DIST;
 }
 
-void drawShapes(vec2 pixelPos)
+void clear(vec2 pixel)
 {
-	for (int i = 0; i < numCircles; i++) {
-		float dist = circleSDF(pixelPos, circles[i].center, circles[i].radius);
-		if (dist <= 0) {
-			imageStore(image, ivec2(pixelPos), vec4(0.4, 0.4, 0.7, 1.0));
-		}
-	}
-
-	for (int i = 0; i < numBoxes; i++) {
-		float dist = boxSDF(pixelPos, boxes[i].center, boxes[i].size);
-		if (dist <= 0) {
-			imageStore(image, ivec2(pixelPos), vec4(0.4, 0.4, 0.7, 1.0));
-		}
-	}
-}	
-
-
-float sceneSDF(vec2 p)
-{
-	float dist = 100000;
-
-	for (int i = 0; i < numCircles; i++){
-		dist = min(circleSDF(p, circles[i].center, circles[i].radius), dist);
-	}
-
-	for (int i = 0; i < numBoxes; i++){
-		dist = min(boxSDF(p, boxes[i].center, boxes[i].size), dist);
-	}
-
-	return dist;
+	imageStore(image, ivec2(pixel), vec4(0.0, 0.0, 0.0, 1.0));
 }
 
+void shading(vec2 pixel, vec3 p)
+{
+	const int numLights = 3;
+	vec3 light[numLights] = {vec3(4, 10, -10), vec3(4, 10, 10), vec3(-5, 10, 10)};
+
+	vec3 normal = estimateNormal(p);
+
+	vec4 color;
+	for (int i = 0; i < numLights; i++) {
+		color += vec4(max(dot(normalize(light[i] - p), normal), 0) * vec3(0.3, 0.4, 1.0), 1.0);
+	}
+	color /= numLights;
+
+	imageStore(image, ivec2(pixel), color);
+}
 
 void main()
 {
+	vec2 dims = imageSize(image);
 	vec2 pixel = gl_GlobalInvocationID.xy;
-	
+
 	clear(pixel);
-	drawShapes(pixel);
 
-	Camera camera = {vec2(100, 700), normalize(mousePos - vec2(100, 700))};
-	drawCircle(pixel, camera.position, 10, vec4(0.5, 0.5, 0.5, 1.0), vec4(0.5, 0.5, 0.5, 1.0));
+	fovv = fovh * dims.y/dims.x;
+	float horizontalInc = fovh/dims.x;
+	float verticalInc = fovv/dims.y;
 
-	float dist = 100000;
-	vec2 pos = camera.position;
-	int iterations = 0;
-	while (dist > 1 && iterations <= 30) {
-		dist = sceneSDF(pos);
-		drawCircle(pixel, pos, dist, vec4(0.5, 0.5, 0.5, 0.1), vec4(0.4, 0.4, 0.4, 1.0));
-		pos += dist * camera.direction;
-		iterations++;
+	float horizontalAngle = pixel.x * horizontalInc - fovh/2;
+	float verticalAngle = pixel.y * verticalInc - fovv/2;
+
+	Camera camera = Camera(viewPosition, viewDirection);
+	
+	vec3 rayDir = vec3(cos(horizontalAngle + viewRotation.x)*cos(verticalAngle + viewRotation.y), sin(verticalAngle + viewRotation.y),
+		sin(horizontalAngle + viewRotation.x)*cos(verticalAngle + viewRotation.y));
+
+	Ray ray = Ray(camera.position, normalize(rayDir));
+
+	float dist = rayMarch(ray);
+
+	if (dist != MAX_DIST) {
+		vec3 p = ray.origin + dist * ray.direction;
+		shading(pixel, p);
 	}
 }

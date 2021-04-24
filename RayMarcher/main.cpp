@@ -15,13 +15,20 @@ GLFWwindow* window;
 double dTime = 0.0;
 double lastTime = 0.0;
 
-glm::vec2 mousePos(0.0f, 0.0f);
+const float speed = 2.0f;
+const float sensitivity = 0.0008f;
+bool cursorHidden = true;
+glm::vec2 mousePos(WINDOW_WIDTH/2, WINDOW_HEIGHT/2);
+
+glm::vec3 direction(0.0f, 0.0f, 1.0f);
+glm::vec3 position(0.0f, 0.0f, -10.0f);
+glm::vec2 mouseRot(0.0f);
 
 GLFWwindow* Initialize(int width, int height, const char* title, int vsync);
 void SetupBuffers(GLuint& VAO);
 void SetupTexture(GLuint width, GLuint height, GLuint& texture);
 void GetComputeGroupInfo();
-void KeyBoardCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
+void KeyBoardInput();
 void MouseMoveCallback(GLFWwindow* window, double xpos, double ypos);
 void FramebufferSizeCallback(GLFWwindow* window, int width, int height);
 
@@ -48,8 +55,12 @@ void main()
 		dTime = currentTime - lastTime;
 		lastTime = currentTime;
 
+		KeyBoardInput();
+
 		computeShader.use();
-		computeShader.setVec2("mousePos", mousePos);
+		computeShader.setVec3("viewDirection", direction);
+		computeShader.setVec3("viewPosition", position);
+		computeShader.setVec2("viewRotation", mouseRot);
 		computeShader.dispatch(texWidth, texHeight, 1);
 
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -85,10 +96,10 @@ GLFWwindow* Initialize(int width, int height, const char* title, int vsync)
 	}
 
 	glfwMakeContextCurrent(window);
-	glfwSetKeyCallback(window, KeyBoardCallback);
 	glfwSetCursorPosCallback(window, MouseMoveCallback);
 	glfwSetFramebufferSizeCallback(window, FramebufferSizeCallback);
 	glfwSwapInterval(vsync);
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
 	if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
 	{
@@ -168,16 +179,45 @@ void GetComputeGroupInfo()
 	std::cout << "Work group invocations: " << workGroupInvocations << std::endl;
 }
 
-void KeyBoardCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+void KeyBoardInput()
 {
-	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
 		glfwSetWindowShouldClose(window, true);
 	}
+	if (glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS) {
+		glfwSetInputMode(window, GLFW_CURSOR, cursorHidden ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+		cursorHidden = !cursorHidden;
+	}
+	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+		position += glm::vec3(direction[0], 0, direction[2]) * speed * float(dTime);
+	}
+	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+		position -= glm::vec3(direction[0], 0, direction[2]) * speed * float(dTime);
+	}
+	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+		position -= glm::vec3(-direction[2], 0, direction[0]) * speed * float(dTime);
+	}
+	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+		position += glm::vec3(-direction[2], 0, direction[0]) * speed * float(dTime);
+	}
+	if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
+		position[1] += speed * float(dTime);
+	}
+	if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
+		position[1] -= speed * float(dTime);
+	}
+	
 }
 
 void MouseMoveCallback(GLFWwindow* window, double xpos, double ypos)
 {
-	mousePos = glm::vec2(float(xpos), WINDOW_HEIGHT - float(ypos));
+	mousePos = glm::vec2(float(xpos), float(ypos));
+	mouseRot = glm::vec2(sensitivity * mousePos.x, -sensitivity * mousePos.y);
+
+	if (cursorHidden) {
+		direction = glm::normalize(glm::vec3(cos(mouseRot.x) * cos(-mouseRot.y), sin(-mouseRot.y), sin(mouseRot.x) * cos(-mouseRot.y)));
+		//std::cout << direction[0] << " " << direction[1] << " " << direction[2] << "\n";
+	}
 }
 
 void FramebufferSizeCallback(GLFWwindow* window, int width, int height)
