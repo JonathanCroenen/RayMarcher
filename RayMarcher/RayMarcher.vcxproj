@@ -156,6 +156,7 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Camera.h" />
     <ClInclude Include="ComputeShader.h" />
     <ClInclude Include="Shader.h" />
   </ItemGroup>

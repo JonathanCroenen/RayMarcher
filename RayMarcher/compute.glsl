@@ -10,9 +10,10 @@ layout (binding = 0, rgba32f) uniform image2D image;
 const float fovh = PI/2;
 float fovv;
 
-uniform vec3 viewDirection;
-uniform vec3 viewPosition;
-uniform vec2 viewRotation;
+//uniform vec3 viewDirection;
+//uniform vec3 viewPosition;
+uniform mat4 cameraToWorld;
+uniform mat4 invProjection;
 
 struct Camera {
 	vec3 position;
@@ -55,9 +56,9 @@ float boxSDF(vec3 p, vec3 pos, vec3 size)
 
 float sceneSDF(vec3 p)
 {
-	float sphere = sphereSDF(p, vec3(0, 0, 0), 1.2);
-	float cube = boxSDF(p, vec3(0, 0, 0), vec3(1));
-	return intersectSDF(cube, sphere);
+	float sphere = sphereSDF(p, vec3(10, 0, 0), 1.2);
+	float cube = boxSDF(p, vec3(10, 0, 0), vec3(1));
+	return intersectSDF(sphere, cube);
 }
 
 vec3 estimateNormal(vec3 p)
@@ -87,25 +88,32 @@ float rayMarch(Ray ray)
 	return MAX_DIST;
 }
 
-void clear(vec2 pixel)
+
+void shading(vec2 pixel, Ray ray, float dist)
 {
-	imageStore(image, ivec2(pixel), vec4(0.0, 0.0, 0.0, 1.0));
+	if (dist != MAX_DIST) {
+		vec3 p = ray.origin + dist * ray.direction;
+
+		const int numLights = 3;
+		vec3 light[numLights] = {vec3(4, 10, -10), vec3(4, 10, 10), vec3(-5, 10, 10)};
+
+		vec3 normal = estimateNormal(p);
+
+		vec4 color;
+		for (int i = 0; i < numLights; i++) {
+			color += vec4(max(dot(normalize(light[i] - p), normal), 0) * vec3(0.3, 0.4, 1.0), 1.0);
+		}
+
+		imageStore(image, ivec2(pixel), color);
+	}
+	else {
+		imageStore(image, ivec2(pixel), vec4(0.7, 0.7, 0.9, 1.0));
+	}
 }
 
-void shading(vec2 pixel, vec3 p)
+vec3 erot(vec3 p, vec3 ax, float ro)
 {
-	const int numLights = 3;
-	vec3 light[numLights] = {vec3(4, 10, -10), vec3(4, 10, 10), vec3(-5, 10, 10)};
-
-	vec3 normal = estimateNormal(p);
-
-	vec4 color;
-	for (int i = 0; i < numLights; i++) {
-		color += vec4(max(dot(normalize(light[i] - p), normal), 0) * vec3(0.3, 0.4, 1.0), 1.0);
-	}
-	color /= numLights;
-
-	imageStore(image, ivec2(pixel), color);
+	return mix(dot(p, ax)*ax, p, cos(ro)) + sin(ro)*cross(ax, p);
 }
 
 void main()
@@ -113,26 +121,17 @@ void main()
 	vec2 dims = imageSize(image);
 	vec2 pixel = gl_GlobalInvocationID.xy;
 
-	clear(pixel);
+	//Camera camera = Camera(viewPosition, viewDirection);
 
-	fovv = fovh * dims.y/dims.x;
-	float horizontalInc = fovh/dims.x;
-	float verticalInc = fovv/dims.y;
 
-	float horizontalAngle = pixel.x * horizontalInc - fovh/2;
-	float verticalAngle = pixel.y * verticalInc - fovv/2;
+	vec3 origin = (cameraToWorld * vec4(0, 0, 0, 1)).xyz;
+	vec3 direction = (invProjection * vec4(2*pixel.x/dims.x - 1, 2*pixel.y/dims.y - 1, 0, 1)).xyz;
+	direction = (cameraToWorld * vec4(direction, 0)).xyz;
+	direction = normalize(direction);
 
-	Camera camera = Camera(viewPosition, viewDirection);
+	Ray ray = Ray(origin, direction);
 	
-	vec3 rayDir = vec3(cos(horizontalAngle + viewRotation.x)*cos(verticalAngle + viewRotation.y), sin(verticalAngle + viewRotation.y),
-		sin(horizontalAngle + viewRotation.x)*cos(verticalAngle + viewRotation.y));
-
-	Ray ray = Ray(camera.position, normalize(rayDir));
-
 	float dist = rayMarch(ray);
-
-	if (dist != MAX_DIST) {
-		vec3 p = ray.origin + dist * ray.direction;
-		shading(pixel, p);
-	}
+	shading(pixel, ray, dist);
+	//imageStore(image, ivec2(pixel), vec4(direction, 1));
 }

@@ -3,26 +3,27 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
+#include <iomanip>
 
 #include "Shader.h"
 #include "ComputeShader.h"
+#include "Camera.h"
+
+constexpr auto PI = 3.1415926535f;
 
 int WINDOW_WIDTH = 1280;
 int WINDOW_HEIGHT = 720;
 
 GLFWwindow* window;
+Camera camera;
 
 double dTime = 0.0;
 double lastTime = 0.0;
 
-const float speed = 2.0f;
+const float speed = 5.0f;
 const float sensitivity = 0.0008f;
 bool cursorHidden = true;
 glm::vec2 mousePos(WINDOW_WIDTH/2, WINDOW_HEIGHT/2);
-
-glm::vec3 direction(0.0f, 0.0f, 1.0f);
-glm::vec3 position(0.0f, 0.0f, -10.0f);
-glm::vec2 mouseRot(0.0f);
 
 GLFWwindow* Initialize(int width, int height, const char* title, int vsync);
 void SetupBuffers(GLuint& VAO);
@@ -31,6 +32,24 @@ void GetComputeGroupInfo();
 void KeyBoardInput();
 void MouseMoveCallback(GLFWwindow* window, double xpos, double ypos);
 void FramebufferSizeCallback(GLFWwindow* window, int width, int height);
+
+float clamp(float n, float l, float h)
+{
+	float t = (n > h) ? h : n;
+	return (t < l) ? l : t;
+}
+
+void printMat4(const glm::mat4& m)
+{
+	std::cout << std::fixed << std::setprecision(2);
+	for (int i = 0; i < 4; i++) {
+		for (int j = 0; j < 4; j++) {
+			std::cout << m[j][i] << " ";
+		}
+		std::cout << "\n";
+	}
+	std::cout << "\n";
+}
 
 void main()
 {
@@ -49,6 +68,11 @@ void main()
 	GetComputeGroupInfo();
 	glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
+	glm::mat4 projection = glm::perspective(PI / 2, float(WINDOW_WIDTH) / WINDOW_HEIGHT, 0.01f, 10000.0f);
+	glm::mat4 invProjection = glm::inverse(projection);
+
+	camera = Camera(glm::vec3(0.0f, 0.0f, -10.0f));
+
 	while (!glfwWindowShouldClose(window))
 	{
 		double currentTime = glfwGetTime();
@@ -58,9 +82,8 @@ void main()
 		KeyBoardInput();
 
 		computeShader.use();
-		computeShader.setVec3("viewDirection", direction);
-		computeShader.setVec3("viewPosition", position);
-		computeShader.setVec2("viewRotation", mouseRot);
+		computeShader.setMat4("cameraToWorld", glm::inverse(camera.GetViewMatrix()));
+		computeShader.setMat4("invProjection", invProjection);
 		computeShader.dispatch(texWidth, texHeight, 1);
 
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -79,6 +102,11 @@ void main()
 	}
 
 	glfwTerminate();
+}
+
+glm::vec3 erot(glm::vec3 p, glm::vec3 ax, float ro)
+{
+	return glm::mix(glm::dot(p, ax) * ax, p, cos(ro)) + sin(ro) * glm::cross(ax, p);
 }
 
 GLFWwindow* Initialize(int width, int height, const char* title, int vsync)
@@ -189,34 +217,34 @@ void KeyBoardInput()
 		cursorHidden = !cursorHidden;
 	}
 	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-		position += glm::vec3(direction[0], 0, direction[2]) * speed * float(dTime);
+		camera.ProcessKeyboard(FORWARD, dTime);
 	}
 	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-		position -= glm::vec3(direction[0], 0, direction[2]) * speed * float(dTime);
+		camera.ProcessKeyboard(BACKWARD, dTime);
 	}
 	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-		position -= glm::vec3(-direction[2], 0, direction[0]) * speed * float(dTime);
+		camera.ProcessKeyboard(LEFT, dTime);
 	}
 	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-		position += glm::vec3(-direction[2], 0, direction[0]) * speed * float(dTime);
+		camera.ProcessKeyboard(RIGHT, dTime);
 	}
 	if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) {
-		position[1] += speed * float(dTime);
+		camera.ProcessKeyboard(UPWARD, dTime);
 	}
 	if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) {
-		position[1] -= speed * float(dTime);
+		camera.ProcessKeyboard(DOWNWARD, dTime);
 	}
 	
 }
 
 void MouseMoveCallback(GLFWwindow* window, double xpos, double ypos)
 {
+	float offsetx = mousePos.x - xpos;
+	float offsety = mousePos.y - ypos;
 	mousePos = glm::vec2(float(xpos), float(ypos));
-	mouseRot = glm::vec2(sensitivity * mousePos.x, -sensitivity * mousePos.y);
 
 	if (cursorHidden) {
-		direction = glm::normalize(glm::vec3(cos(mouseRot.x) * cos(-mouseRot.y), sin(-mouseRot.y), sin(mouseRot.x) * cos(-mouseRot.y)));
-		//std::cout << direction[0] << " " << direction[1] << " " << direction[2] << "\n";
+		camera.ProcessMouseMovement(-offsetx, offsety);
 	}
 }
 
